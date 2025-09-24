@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  file-upload-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: file-upload-web:latest
+    container_name: file-upload-web
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - UPLOAD_DIR=/uploads
+      - MAX_SIZE=10
+    volumes:
+      - ./uploads:/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

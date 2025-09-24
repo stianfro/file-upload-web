@@ -1,50 +1,90 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!-- Sync Impact Report
+Version change: 0.0.0 → 1.0.0
+Modified principles: N/A (initial creation)
+Added sections: All sections (initial creation)
+Removed sections: None
+Templates requiring updates:
+- plan-template.md: ✅ Constitution Check references aligned
+- spec-template.md: ✅ Scope aligned with simplicity principles
+- tasks-template.md: ⚠ pending (needs review for task categorization)
+Follow-up TODOs:
+- RATIFICATION_DATE: Set to today (2025-09-23) as initial adoption
+-->
+
+# File Upload Web Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. KISS - Keep It Simple, Stupid
+Every solution must be as simple as possible, but no simpler. Complexity
+must be justified by clear, measurable benefits. When in doubt, choose the
+simpler path. This is the foundational principle from which all others derive.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Single Responsibility
+Each component, function, and module does one thing well. No multi-purpose
+utilities. Clear boundaries between concerns. If you can't explain what
+something does in one sentence, it's too complex.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. Minimal Dependencies
+External dependencies must be critically evaluated. Every library added
+increases attack surface, maintenance burden, and complexity. Build only
+what's needed, use only what's essential.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. Progressive Enhancement
+Start with the simplest working solution. Add features only when proven
+necessary. Every enhancement must maintain backward compatibility unless
+breaking changes are explicitly justified and documented.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. Explicit Over Implicit
+Code clarity trumps cleverness. No magic. No hidden behaviors. Configuration
+should be obvious. Errors should be clear. Documentation should be unnecessary
+because the code explains itself.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## Development Standards
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### Testing Philosophy
+- Test behavior, not implementation
+- Focus on integration over unit tests
+- Tests must be simpler than the code they test
+- If a test is hard to write, the code is too complex
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+### Code Review Requirements
+- Every PR must reduce or maintain complexity
+- No PR exceeds 200 lines without justification
+- Complex logic requires inline documentation
+- Performance optimizations require benchmarks
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+## Operational Guidelines
+
+### Deployment Simplicity
+- Single command deployment
+- Rollback capability within 60 seconds
+- No more than 3 configuration parameters
+- Environment parity from development to production
+
+### Monitoring Essentials
+- Log errors, not everything
+- Three golden metrics: availability, latency, error rate
+- Alerts only for actionable problems
+- Debug mode toggleable without rebuild
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+### Amendment Process
+- Proposed changes must demonstrate simplification benefit
+- Complexity additions require 2x value justification
+- All amendments require working code examples
+- Version bumps follow semantic versioning
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+### Compliance Verification
+- All PRs must reference constitution compliance
+- Complexity metrics tracked and reported
+- Regular simplification sprints scheduled
+- Technical debt explicitly justified or eliminated
+
+### Versioning Policy
+- MAJOR: Removing principles or incompatible simplifications
+- MINOR: Adding principles or new simplification guidelines
+- PATCH: Clarifications and wording improvements
+
+**Version**: 1.0.0 | **Ratified**: 2025-09-23 | **Last Amended**: 2025-09-23

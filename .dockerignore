@@ -1,0 +1,46 @@
+# Git files
+.git
+.gitignore
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+file-upload-web
+*.test
+*.out
+
+# Test files
+test.txt
+test_*.txt
+*.bin
+uploads/
+
+# Documentation
+*.md
+LICENSE
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Helm charts
+charts/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Specs and design docs
+specs/
+.specify/
+.claude/
