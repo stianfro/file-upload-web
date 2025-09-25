@@ -87,11 +87,14 @@ func uploadHandler(uploadDir string, maxSizeBytes int64) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		// Sanitize filename
-		filename := sanitizeFilename(header.Filename)
-
-		// Create timestamped filename
+		// Create timestamp first
 		timestamp := time.Now().Format("20060102_150405")
+
+		// Sanitize filename - account for timestamp in length limit
+		// Timestamp format "20060102_150405_" is 16 chars
+		filename := sanitizeFilenameWithMaxLen(header.Filename, 255-16)
+
+		// Create final filename
 		finalName := fmt.Sprintf("%s_%s", timestamp, filename)
 		filepath := filepath.Join(uploadDir, finalName)
 
@@ -127,7 +130,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func sanitizeFilename(name string) string {
+func sanitizeFilenameWithMaxLen(name string, maxLen int) string {
 	// Remove path components
 	name = filepath.Base(name)
 
@@ -145,11 +148,25 @@ func sanitizeFilename(name string) string {
 		name = "unnamed"
 	}
 
-	// Limit length
-	if len(name) > 255 {
+	// Limit length based on provided max length
+	if len(name) > maxLen {
 		ext := filepath.Ext(name)
-		base := name[:255-len(ext)]
-		name = base + ext
+		if len(ext) > maxLen {
+			// If extension itself is too long, truncate everything
+			name = name[:maxLen]
+		} else {
+			// Keep extension if reasonable, truncate base
+			maxBase := maxLen - len(ext)
+			if maxBase > 0 {
+				base := name[:len(name)-len(ext)]
+				if len(base) > maxBase {
+					base = base[:maxBase]
+				}
+				name = base + ext
+			} else {
+				name = name[:maxLen]
+			}
+		}
 	}
 
 	return name

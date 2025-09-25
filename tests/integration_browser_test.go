@@ -2,32 +2,26 @@ package tests
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
 )
 
-// TestBrowserUploadFlow simulates a complete browser upload flow
+// TestBrowserUploadFlow simulates a full browser upload flow
 func TestBrowserUploadFlow(t *testing.T) {
-	// This test will initially fail since main.go doesn't exist yet
-	// It tests the complete browser upload flow:
-	// 1. GET / to retrieve the form
-	// 2. Parse the form to extract action and method
-	// 3. POST a file using multipart/form-data
-	// 4. Verify successful upload response
+	// Skip if server is not running
+	resp, err := http.Get("http://localhost:8080/health")
+	if err != nil {
+		t.Skip("Server not running on localhost:8080, skipping integration tests")
+	}
+	resp.Body.Close()
 
-	// Start the server (this will fail initially since main.go doesn't exist)
-	server := httptest.NewServer(getHandler())
-	defer server.Close()
-
-	t.Run("CompleteUploadFlow", func(t *testing.T) {
+	t.Run("complete browser upload flow", func(t *testing.T) {
 		// Step 1: GET / to retrieve the form
-		resp, err := http.Get(server.URL + "/")
+		resp, err := http.Get("http://localhost:8080/")
 		if err != nil {
 			t.Fatalf("Failed to GET /: %v", err)
 		}
@@ -37,191 +31,162 @@ func TestBrowserUploadFlow(t *testing.T) {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
 
-		// Read the response body
-		body, err := io.ReadAll(resp.Body)
+		// Read the HTML content
+		htmlContent, err := io.ReadAll(resp.Body)
 		if err != nil {
-			t.Fatalf("Failed to read response body: %v", err)
+			t.Fatalf("Failed to read HTML content: %v", err)
 		}
 
-		htmlContent := string(body)
-
 		// Step 2: Parse the form to extract action and method
-		formAction, formMethod := parseFormDetails(t, htmlContent)
+		actionRegex := regexp.MustCompile(`action="([^"]+)"`)
+		methodRegex := regexp.MustCompile(`method="([^"]+)"`)
 
-		// Verify we have a file upload form
-		if !strings.Contains(htmlContent, `type="file"`) {
-			t.Fatal("Form does not contain a file input")
+		actionMatches := actionRegex.FindStringSubmatch(string(htmlContent))
+		if len(actionMatches) < 2 {
+			t.Fatal("Could not find form action")
+		}
+		formAction := actionMatches[1]
+
+		methodMatches := methodRegex.FindStringSubmatch(string(htmlContent))
+		if len(methodMatches) < 2 {
+			t.Fatal("Could not find form method")
+		}
+		formMethod := methodMatches[1]
+
+		// Verify form attributes
+		if formAction != "/upload" {
+			t.Errorf("Expected form action '/upload', got '%s'", formAction)
+		}
+
+		if !strings.EqualFold(formMethod, "POST") {
+			t.Errorf("Expected form method 'POST', got '%s'", formMethod)
 		}
 
 		// Step 3: POST a file using multipart/form-data
-		fileContent := "This is a test file content for upload testing"
-		fileName := "test-file.txt"
+		var uploadBody bytes.Buffer
+		writer := multipart.NewWriter(&uploadBody)
 
-		// Create multipart form data
-		body = &bytes.Buffer{}
-		writer := multipart.NewWriter(body)
-
-		// Create file part
-		part, err := writer.CreateFormFile("file", fileName)
+		// Add file field
+		fileWriter, err := writer.CreateFormFile("file", "test-browser.txt")
 		if err != nil {
 			t.Fatalf("Failed to create form file: %v", err)
 		}
 
-		// Write file content
-		_, err = part.Write([]byte(fileContent))
+		fileContent := "Test content from browser simulation"
+		_, err = fileWriter.Write([]byte(fileContent))
 		if err != nil {
 			t.Fatalf("Failed to write file content: %v", err)
 		}
 
-		// Close the writer to finalize the form
-		err = writer.Close()
+		writer.Close()
+
+		// Make the upload request
+		uploadURL := "http://localhost:8080" + formAction
+		req, err := http.NewRequest(strings.ToUpper(formMethod), uploadURL, &uploadBody)
 		if err != nil {
-			t.Fatalf("Failed to close multipart writer: %v", err)
+			t.Fatalf("Failed to create upload request: %v", err)
 		}
-
-		// Determine upload URL
-		uploadURL := server.URL
-		if formAction != "" && formAction != "/" {
-			uploadURL = server.URL + formAction
-		}
-
-		// Create POST request
-		req, err := http.NewRequest(strings.ToUpper(formMethod), uploadURL, body)
-		if err != nil {
-			t.Fatalf("Failed to create POST request: %v", err)
-		}
-
-		// Set content type header
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 
-		// Send the request
 		client := &http.Client{}
-		resp, err = client.Do(req)
+		uploadResp, err := client.Do(req)
 		if err != nil {
-			t.Fatalf("Failed to send POST request: %v", err)
+			t.Fatalf("Failed to upload file: %v", err)
 		}
-		defer resp.Body.Close()
+		defer uploadResp.Body.Close()
 
 		// Step 4: Verify successful upload response
-		if resp.StatusCode != http.StatusOK {
-			// Read error response for debugging
-			errorBody, _ := io.ReadAll(resp.Body)
-			t.Fatalf("Expected status 200, got %d. Response: %s", resp.StatusCode, string(errorBody))
+		if uploadResp.StatusCode != http.StatusOK {
+			t.Errorf("Expected upload status 200, got %d", uploadResp.StatusCode)
 		}
 
-		// Read successful response
-		responseBody, err := io.ReadAll(resp.Body)
+		responseBody, err := io.ReadAll(uploadResp.Body)
 		if err != nil {
 			t.Fatalf("Failed to read upload response: %v", err)
 		}
 
-		responseStr := string(responseBody)
-
-		// Verify response indicates successful upload
-		successIndicators := []string{
-			"success",
-			"uploaded",
-			"complete",
-			fileName, // The uploaded file name should appear in response
+		responseText := string(responseBody)
+		if !strings.Contains(responseText, "File uploaded successfully") {
+			t.Errorf("Expected success message in response, got: %s", responseText)
 		}
 
-		foundIndicator := false
-		for _, indicator := range successIndicators {
-			if strings.Contains(strings.ToLower(responseStr), strings.ToLower(indicator)) {
-				foundIndicator = true
-				break
-			}
+		if !strings.Contains(responseText, "test-browser.txt") {
+			t.Errorf("Expected filename in response, got: %s", responseText)
 		}
-
-		if !foundIndicator {
-			t.Fatalf("Upload response does not indicate success. Response: %s", responseStr)
-		}
-
-		t.Logf("Upload test completed successfully")
-		t.Logf("Uploaded file: %s (%d bytes)", fileName, len(fileContent))
-		t.Logf("Server response: %s", responseStr)
 	})
 }
 
-// parseFormDetails extracts form action and method from HTML content
-func parseFormDetails(t *testing.T, htmlContent string) (action, method string) {
-	// Default values
-	action = "/"
-	method = "POST"
-
-	// Parse form tag to extract action and method
-	formRegex := regexp.MustCompile(`<form[^>]*>`)
-	formMatch := formRegex.FindString(htmlContent)
-
-	if formMatch != "" {
-		// Extract action attribute
-		actionRegex := regexp.MustCompile(`action\s*=\s*["']([^"']*)["']`)
-		if actionMatch := actionRegex.FindStringSubmatch(formMatch); len(actionMatch) > 1 {
-			action = actionMatch[1]
-		}
-
-		// Extract method attribute
-		methodRegex := regexp.MustCompile(`method\s*=\s*["']([^"']*)["']`)
-		if methodMatch := methodRegex.FindStringSubmatch(formMatch); len(methodMatch) > 1 {
-			method = methodMatch[1]
-		}
+// TestBrowserEdgeCases tests edge cases for browser uploads
+func TestBrowserEdgeCases(t *testing.T) {
+	// Skip if server is not running
+	resp, err := http.Get("http://localhost:8080/health")
+	if err != nil {
+		t.Skip("Server not running on localhost:8080, skipping integration tests")
 	}
+	resp.Body.Close()
 
-	t.Logf("Parsed form details - Action: %s, Method: %s", action, method)
-	return action, method
-}
+	t.Run("upload with empty filename", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
 
-// getHandler returns the HTTP handler for testing
-// This function will need to be implemented when main.go exists
-func getHandler() http.Handler {
-	// TODO: This should return the actual handler from main.go
-	// For now, return a mock handler that will cause the test to fail
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// This is a placeholder that will cause the test to fail initially
-		http.Error(w, "main.go does not exist yet - implement the actual server", http.StatusNotImplemented)
+		// Create form file with empty filename
+		fileWriter, err := writer.CreateFormFile("file", "")
+		if err != nil {
+			t.Fatalf("Failed to create form file: %v", err)
+		}
+
+		_, err = fileWriter.Write([]byte("content"))
+		if err != nil {
+			t.Fatalf("Failed to write content: %v", err)
+		}
+		writer.Close()
+
+		resp, err := http.Post(
+			"http://localhost:8080/upload",
+			writer.FormDataContentType(),
+			&body,
+		)
+		if err != nil {
+			t.Fatalf("Failed to upload: %v", err)
+		}
+		defer resp.Body.Close()
+
+		// Empty filename is a bad request - we need a filename
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Expected status 400 for empty filename, got %d", resp.StatusCode)
+		}
 	})
-}
 
-// Helper function to verify file upload functionality
-func TestFileUploadValidation(t *testing.T) {
-	t.Run("ValidateMultipartFormData", func(t *testing.T) {
-		// Test multipart form creation
-		body := &bytes.Buffer{}
-		writer := multipart.NewWriter(body)
+	t.Run("upload with very long filename", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
 
-		// Create a test file part
-		part, err := writer.CreateFormFile("file", "test.txt")
+		// Create a very long filename
+		longName := strings.Repeat("a", 300) + ".txt"
+		fileWriter, err := writer.CreateFormFile("file", longName)
 		if err != nil {
-			t.Fatalf("Failed to create form file part: %v", err)
+			t.Fatalf("Failed to create form file: %v", err)
 		}
 
-		testContent := "test file content"
-		_, err = part.Write([]byte(testContent))
+		_, err = fileWriter.Write([]byte("content"))
 		if err != nil {
-			t.Fatalf("Failed to write to form file part: %v", err)
+			t.Fatalf("Failed to write content: %v", err)
 		}
+		writer.Close()
 
-		err = writer.Close()
+		resp, err := http.Post(
+			"http://localhost:8080/upload",
+			writer.FormDataContentType(),
+			&body,
+		)
 		if err != nil {
-			t.Fatalf("Failed to close multipart writer: %v", err)
+			t.Fatalf("Failed to upload: %v", err)
 		}
+		defer resp.Body.Close()
 
-		// Verify content type is correctly set
-		contentType := writer.FormDataContentType()
-		if !strings.HasPrefix(contentType, "multipart/form-data") {
-			t.Fatalf("Expected multipart/form-data content type, got: %s", contentType)
+		// Should succeed with truncated filename
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
 		}
-
-		// Verify body contains the expected boundary
-		bodyStr := body.String()
-		if !strings.Contains(bodyStr, "test.txt") {
-			t.Fatal("Multipart body does not contain filename")
-		}
-
-		if !strings.Contains(bodyStr, testContent) {
-			t.Fatal("Multipart body does not contain file content")
-		}
-
-		t.Log("Multipart form data validation passed")
 	})
 }

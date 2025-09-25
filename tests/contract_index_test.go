@@ -1,106 +1,121 @@
 package tests
 
 import (
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIndexEndpoint(t *testing.T) {
-	// This test will initially fail since main.go doesn't exist yet
-	// It serves as a contract test for the GET / endpoint requirements
+	// Skip if server is not running
+	resp, err := http.Get("http://localhost:8080/health")
+	if err != nil {
+		t.Skip("Server not running on localhost:8080, skipping integration tests")
+	}
+	resp.Body.Close()
 
-	// TODO: Import and use the actual handler from main.go when it exists
-	// import "github.com/stianfro/file-upload-web"
-	// handler := main.GetRouter() or similar
-
-	// For now, create a test that will fail to demonstrate the contract
-	// Replace this with actual implementation testing once main.go exists
-	// Comment out the next line to see the test fail when no implementation exists
-	t.Skip("Skipping test until main.go implementation is available")
-
-	// Uncomment the following lines to test against a real server:
-	// resp, err := http.Get("http://localhost:8080/")
-	// if err != nil {
-	//     t.Fatalf("Failed to connect to server: %v", err)
-	// }
-	// defer resp.Body.Close()
-	//
-	// The test would fail here since no server is running
-
-	// Mock handler for development/testing purposes:
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// This is a placeholder - the actual implementation will be in main.go
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
+	t.Run("GET / returns 200 OK", func(t *testing.T) {
+		resp, err := http.Get("http://localhost:8080/")
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
 		}
+		defer resp.Body.Close()
 
-		if r.URL.Path != "/" {
-			http.Error(w, "Not found", http.StatusNotFound)
-			return
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
 		}
-
-		// Return HTML form as required
-		html := `<!DOCTYPE html>
-<html>
-<head>
-    <title>File Upload</title>
-</head>
-<body>
-    <form action="/upload" method="POST" enctype="multipart/form-data">
-        <input type="file" name="file" required>
-        <button type="submit">Upload</button>
-    </form>
-</body>
-</html>`
-
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(html))
 	})
 
-	// Create a test server
-	server := httptest.NewServer(handler)
-	defer server.Close()
+	t.Run("GET / returns HTML content", func(t *testing.T) {
+		resp, err := http.Get("http://localhost:8080/")
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
 
-	// Test 1: Endpoint returns 200 OK
-	resp, err := http.Get(server.URL + "/")
+		// Check Content-Type
+		contentType := resp.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "text/html") {
+			t.Errorf("Expected Content-Type to contain 'text/html', got '%s'", contentType)
+		}
+
+		// Read body
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("Failed to read response body: %v", err)
+		}
+
+		html := string(body)
+
+		// Verify HTML structure
+		if !strings.Contains(html, "<form") {
+			t.Error("Expected HTML to contain a form element")
+		}
+
+		if !strings.Contains(html, `action="/upload"`) {
+			t.Error("Expected form action to be '/upload'")
+		}
+
+		if !strings.Contains(html, `method="POST"`) {
+			t.Error("Expected form method to be 'POST'")
+		}
+
+		if !strings.Contains(html, `enctype="multipart/form-data"`) {
+			t.Error("Expected form enctype to be 'multipart/form-data'")
+		}
+
+		if !strings.Contains(html, `type="file"`) {
+			t.Error("Expected form to contain a file input")
+		}
+	})
+
+	t.Run("POST / returns 405 Method Not Allowed", func(t *testing.T) {
+		resp, err := http.Post("http://localhost:8080/", "text/plain", strings.NewReader("test"))
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status 405, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GET /nonexistent returns 404 Not Found", func(t *testing.T) {
+		resp, err := http.Get("http://localhost:8080/nonexistent")
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d", resp.StatusCode)
+		}
+	})
+}
+
+// TestIndexEndpointPerformance tests the performance of the index endpoint
+func TestIndexEndpointPerformance(t *testing.T) {
+	// Skip if server is not running
+	resp, err := http.Get("http://localhost:8080/health")
 	if err != nil {
-		t.Fatalf("Failed to make GET request: %v", err)
+		t.Skip("Server not running on localhost:8080, skipping integration tests")
 	}
-	defer resp.Body.Close()
+	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, resp.StatusCode)
-	}
+	t.Run("response time under 100ms", func(t *testing.T) {
+		start := time.Now()
+		resp, err := http.Get("http://localhost:8080/")
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		resp.Body.Close()
 
-	// Read response body for further tests
-	buf := make([]byte, 1024*10) // 10KB buffer should be enough for a simple HTML form
-	n, err := resp.Body.Read(buf)
-	if err != nil && err.Error() != "EOF" {
-		t.Fatalf("Failed to read response body: %v", err)
-	}
-
-	body := string(buf[:n])
-
-	// Test 2: Response contains an HTML form element
-	if !strings.Contains(body, "<form") || !strings.Contains(body, "</form>") {
-		t.Error("Response does not contain an HTML form element")
-	}
-
-	// Test 3: Form has the correct action="/upload" and method="POST"
-	if !strings.Contains(body, `action="/upload"`) {
-		t.Error("Form does not have the correct action='/upload'")
-	}
-
-	if !strings.Contains(body, `method="POST"`) {
-		t.Error("Form does not have the correct method='POST'")
-	}
-
-	// Test 4: Form has enctype="multipart/form-data"
-	if !strings.Contains(body, `enctype="multipart/form-data"`) {
-		t.Error("Form does not have the correct enctype='multipart/form-data'")
-	}
+		elapsed := time.Since(start)
+		if elapsed > 100*time.Millisecond {
+			t.Errorf("Response time too slow: %v", elapsed)
+		}
+	})
 }

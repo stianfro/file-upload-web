@@ -1,379 +1,302 @@
 package tests
 
 import (
+	"bytes"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"mime/multipart"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-const (
-	serverURL = "http://localhost:8080/upload"
-	testDir   = "/tmp/file_upload_test"
-)
-
-func TestMain(m *testing.M) {
-	// Setup test directory and files
-	setupTestEnvironment()
-
-	// Run tests
-	code := m.Run()
-
-	// Cleanup
-	cleanupTestEnvironment()
-
-	os.Exit(code)
-}
-
-func setupTestEnvironment() {
-	// Create test directory
-	os.MkdirAll(testDir, 0755)
-
-	// Create test files
-	createTestFile("simple.txt", "Hello, World!")
-	createTestFile("file with spaces.txt", "File with spaces in name")
-	createTestFile("special-chars_@#$.txt", "File with special characters")
-	createTestFile("large.txt", strings.Repeat("Large file content\n", 100))
-	createTestFile("binary.dat", string([]byte{0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE, 0xFD}))
-}
-
-func cleanupTestEnvironment() {
-	os.RemoveAll(testDir)
-}
-
-func createTestFile(filename, content string) {
-	filepath := filepath.Join(testDir, filename)
-	file, err := os.Create(filepath)
+// TestCurlUploadScenarios tests curl upload scenarios
+func TestCurlUploadScenarios(t *testing.T) {
+	// Skip if server is not running
+	resp, err := http.Get("http://localhost:8080/health")
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create test file %s: %v", filename, err))
+		t.Skip("Server not running on localhost:8080, skipping integration tests")
 	}
-	defer file.Close()
+	resp.Body.Close()
 
-	if _, err := file.WriteString(content); err != nil {
-		panic(fmt.Sprintf("Failed to write to test file %s: %v", filename, err))
-	}
-}
+	t.Run("basic file upload with form data", func(t *testing.T) {
+		// Simulate: curl -X POST -F "file=@test.txt" http://localhost:8080/upload
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
 
-func isServerRunning() bool {
-	cmd := exec.Command("curl", "-s", "-f", "-o", "/dev/null", serverURL)
-	err := cmd.Run()
-	return err == nil
-}
-
-func waitForServer(timeout time.Duration) error {
-	start := time.Now()
-	for time.Since(start) < timeout {
-		if isServerRunning() {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("server not available after %v", timeout)
-}
-
-func TestBasicFileUpload(t *testing.T) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		t.Skip("Server not running:", err)
-	}
-
-	testFile := filepath.Join(testDir, "simple.txt")
-
-	// Test basic file upload using curl
-	cmd := exec.Command("curl",
-		"-X", "POST",
-		"-F", fmt.Sprintf("file=@%s", testFile),
-		"-w", "%{http_code}",
-		"-s", "-o", "/dev/null",
-		serverURL,
-	)
-
-	output, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("curl command failed: %v", err)
-	}
-
-	statusCode := strings.TrimSpace(string(output))
-	if statusCode != "200" && statusCode != "201" {
-		t.Errorf("Expected status code 200 or 201, got: %s", statusCode)
-	}
-
-	t.Logf("Basic file upload test completed with status: %s", statusCode)
-}
-
-func TestMultipleFilesSequential(t *testing.T) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		t.Skip("Server not running:", err)
-	}
-
-	testFiles := []string{"simple.txt", "large.txt", "binary.dat"}
-
-	for i, filename := range testFiles {
-		t.Run(fmt.Sprintf("Upload_%d_%s", i+1, filename), func(t *testing.T) {
-			testFile := filepath.Join(testDir, filename)
-
-			cmd := exec.Command("curl",
-				"-X", "POST",
-				"-F", fmt.Sprintf("file=@%s", testFile),
-				"-w", "%{http_code}",
-				"-s", "-o", "/dev/null",
-				serverURL,
-			)
-
-			output, err := cmd.Output()
-			if err != nil {
-				t.Fatalf("curl command failed for %s: %v", filename, err)
-			}
-
-			statusCode := strings.TrimSpace(string(output))
-			if statusCode != "200" && statusCode != "201" {
-				t.Errorf("Expected status code 200 or 201 for %s, got: %s", filename, statusCode)
-			}
-
-			t.Logf("Sequential upload %d (%s) completed with status: %s", i+1, filename, statusCode)
-		})
-	}
-}
-
-func TestFilenameSpecialCharacters(t *testing.T) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		t.Skip("Server not running:", err)
-	}
-
-	testCases := []struct {
-		name        string
-		filename    string
-		description string
-	}{
-		{
-			name:        "SpacesInFilename",
-			filename:    "file with spaces.txt",
-			description: "File with spaces in filename",
-		},
-		{
-			name:        "SpecialCharacters",
-			filename:    "special-chars_@#$.txt",
-			description: "File with special characters",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			testFile := filepath.Join(testDir, tc.filename)
-
-			// Verify test file exists
-			if _, err := os.Stat(testFile); os.IsNotExist(err) {
-				t.Fatalf("Test file does not exist: %s", testFile)
-			}
-
-			cmd := exec.Command("curl",
-				"-X", "POST",
-				"-F", fmt.Sprintf("file=@%s", testFile),
-				"-w", "%{http_code}",
-				"-s", "-o", "/dev/null",
-				serverURL,
-			)
-
-			output, err := cmd.Output()
-			if err != nil {
-				t.Fatalf("curl command failed for %s: %v", tc.filename, err)
-			}
-
-			statusCode := strings.TrimSpace(string(output))
-			if statusCode != "200" && statusCode != "201" {
-				t.Errorf("Expected status code 200 or 201 for %s, got: %s", tc.filename, statusCode)
-			}
-
-			t.Logf("Special character filename test (%s) completed with status: %s", tc.description, statusCode)
-		})
-	}
-}
-
-func TestConcurrentUploads(t *testing.T) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		t.Skip("Server not running:", err)
-	}
-
-	const numConcurrent = 5
-	testFiles := []string{"simple.txt", "large.txt", "binary.dat", "file with spaces.txt", "special-chars_@#$.txt"}
-
-	var wg sync.WaitGroup
-	results := make(chan struct {
-		filename   string
-		statusCode string
-		err        error
-	}, numConcurrent)
-
-	// Launch concurrent uploads
-	for i := 0; i < numConcurrent; i++ {
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
-
-			filename := testFiles[index%len(testFiles)]
-			testFile := filepath.Join(testDir, filename)
-
-			cmd := exec.Command("curl",
-				"-X", "POST",
-				"-F", fmt.Sprintf("file=@%s", testFile),
-				"-w", "%{http_code}",
-				"-s", "-o", "/dev/null",
-				serverURL,
-			)
-
-			output, err := cmd.Output()
-			statusCode := ""
-			if err == nil {
-				statusCode = strings.TrimSpace(string(output))
-			}
-
-			results <- struct {
-				filename   string
-				statusCode string
-				err        error
-			}{filename, statusCode, err}
-		}(i)
-	}
-
-	// Close results channel when all goroutines complete
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect and validate results
-	successCount := 0
-	for result := range results {
-		if result.err != nil {
-			t.Errorf("Concurrent upload failed for %s: %v", result.filename, result.err)
-			continue
-		}
-
-		if result.statusCode != "200" && result.statusCode != "201" {
-			t.Errorf("Expected status code 200 or 201 for concurrent upload of %s, got: %s", result.filename, result.statusCode)
-		} else {
-			successCount++
-		}
-
-		t.Logf("Concurrent upload of %s completed with status: %s", result.filename, result.statusCode)
-	}
-
-	if successCount == 0 {
-		t.Fatal("No concurrent uploads succeeded")
-	}
-
-	t.Logf("Concurrent uploads completed: %d/%d successful", successCount, numConcurrent)
-}
-
-func TestUploadWithAdditionalFormData(t *testing.T) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		t.Skip("Server not running:", err)
-	}
-
-	testFile := filepath.Join(testDir, "simple.txt")
-
-	// Test file upload with additional form fields
-	cmd := exec.Command("curl",
-		"-X", "POST",
-		"-F", fmt.Sprintf("file=@%s", testFile),
-		"-F", "description=Test file upload",
-		"-F", "category=test",
-		"-F", "tags=integration,curl,test",
-		"-w", "%{http_code}",
-		"-s", "-o", "/dev/null",
-		serverURL,
-	)
-
-	output, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("curl command failed: %v", err)
-	}
-
-	statusCode := strings.TrimSpace(string(output))
-	if statusCode != "200" && statusCode != "201" {
-		t.Errorf("Expected status code 200 or 201, got: %s", statusCode)
-	}
-
-	t.Logf("Upload with additional form data completed with status: %s", statusCode)
-}
-
-func TestUploadNonExistentFile(t *testing.T) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		t.Skip("Server not running:", err)
-	}
-
-	nonExistentFile := filepath.Join(testDir, "does_not_exist.txt")
-
-	// Test upload of non-existent file (should fail)
-	cmd := exec.Command("curl",
-		"-X", "POST",
-		"-F", fmt.Sprintf("file=@%s", nonExistentFile),
-		"-w", "%{http_code}",
-		"-s", "-o", "/dev/null",
-		serverURL,
-	)
-
-	output, err := cmd.Output()
-	// We expect this to fail at the curl level or return an error status
-	if err == nil {
-		statusCode := strings.TrimSpace(string(output))
-		t.Logf("Upload of non-existent file returned status: %s", statusCode)
-		// Server should handle this gracefully, either 400 or 404
-		if statusCode == "200" || statusCode == "201" {
-			t.Error("Upload of non-existent file should not succeed")
-		}
-	} else {
-		t.Logf("Upload of non-existent file failed as expected: %v", err)
-	}
-}
-
-// Benchmark functions for performance testing
-func BenchmarkSingleFileUpload(b *testing.B) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		b.Skip("Server not running:", err)
-	}
-
-	testFile := filepath.Join(testDir, "simple.txt")
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cmd := exec.Command("curl",
-			"-X", "POST",
-			"-F", fmt.Sprintf("file=@%s", testFile),
-			"-s", "-o", "/dev/null",
-			serverURL,
-		)
-
-		err := cmd.Run()
+		fileWriter, err := writer.CreateFormFile("file", "curl_test.txt")
 		if err != nil {
-			b.Fatalf("curl command failed: %v", err)
+			t.Fatalf("Failed to create form file: %v", err)
 		}
-	}
+
+		_, err = io.WriteString(fileWriter, "Test content from curl simulation")
+		if err != nil {
+			t.Fatalf("Failed to write content: %v", err)
+		}
+
+		writer.Close()
+
+		resp, err := http.Post(
+			"http://localhost:8080/upload",
+			writer.FormDataContentType(),
+			&body,
+		)
+		if err != nil {
+			t.Fatalf("Failed to upload: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("Failed to read response: %v", err)
+		}
+
+		if !strings.Contains(string(respBody), "File uploaded successfully") {
+			t.Errorf("Expected success message, got: %s", string(respBody))
+		}
+	})
+
+	t.Run("multiple files sequential upload", func(t *testing.T) {
+		// Simulate uploading multiple files one after another
+		files := []struct {
+			name    string
+			content string
+		}{
+			{"file1.txt", "Content of file 1"},
+			{"file2.txt", "Content of file 2"},
+			{"file3.bin", "Binary data simulation"},
+		}
+
+		for _, file := range files {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+
+			fileWriter, err := writer.CreateFormFile("file", file.name)
+			if err != nil {
+				t.Fatalf("Failed to create form file %s: %v", file.name, err)
+			}
+
+			_, err = io.WriteString(fileWriter, file.content)
+			if err != nil {
+				t.Fatalf("Failed to write content for %s: %v", file.name, err)
+			}
+
+			writer.Close()
+
+			resp, err := http.Post(
+				"http://localhost:8080/upload",
+				writer.FormDataContentType(),
+				&body,
+			)
+			if err != nil {
+				t.Fatalf("Failed to upload %s: %v", file.name, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("Upload of %s failed with status %d", file.name, resp.StatusCode)
+			}
+
+			respBody, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("Failed to read response for %s: %v", file.name, err)
+			}
+
+			if !strings.Contains(string(respBody), file.name) {
+				t.Errorf("Expected filename %s in response, got: %s", file.name, string(respBody))
+			}
+		}
+	})
+
+	t.Run("filename with special characters", func(t *testing.T) {
+		specialFilenames := []string{
+			"file with spaces.txt",
+			"file-with-dashes.txt",
+			"file_with_underscores.txt",
+			"file.multiple.dots.txt",
+		}
+
+		for _, filename := range specialFilenames {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+
+			fileWriter, err := writer.CreateFormFile("file", filename)
+			if err != nil {
+				t.Fatalf("Failed to create form file %s: %v", filename, err)
+			}
+
+			_, err = io.WriteString(fileWriter, "Special filename test")
+			if err != nil {
+				t.Fatalf("Failed to write content: %v", err)
+			}
+
+			writer.Close()
+
+			resp, err := http.Post(
+				"http://localhost:8080/upload",
+				writer.FormDataContentType(),
+				&body,
+			)
+			if err != nil {
+				t.Fatalf("Failed to upload %s: %v", filename, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("Upload of %s failed with status %d", filename, resp.StatusCode)
+			}
+
+			respBody, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("Failed to read response: %v", err)
+			}
+
+			// Verify the file was uploaded successfully
+			if !strings.Contains(string(respBody), "File uploaded successfully") {
+				t.Errorf("Expected success for file %s, got: %s", filename, string(respBody))
+			}
+		}
+	})
+
+	t.Run("concurrent uploads", func(t *testing.T) {
+		numUploads := 5
+		var wg sync.WaitGroup
+		errors := make(chan error, numUploads)
+
+		for i := 0; i < numUploads; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+
+				var body bytes.Buffer
+				writer := multipart.NewWriter(&body)
+
+				filename := fmt.Sprintf("concurrent_%d.txt", index)
+				fileWriter, err := writer.CreateFormFile("file", filename)
+				if err != nil {
+					errors <- fmt.Errorf("failed to create form file %s: %v", filename, err)
+					return
+				}
+
+				content := fmt.Sprintf("Concurrent upload content %d", index)
+				_, err = io.WriteString(fileWriter, content)
+				if err != nil {
+					errors <- fmt.Errorf("failed to write content: %v", err)
+					return
+				}
+
+				writer.Close()
+
+				resp, err := http.Post(
+					"http://localhost:8080/upload",
+					writer.FormDataContentType(),
+					&body,
+				)
+				if err != nil {
+					errors <- fmt.Errorf("failed to upload %s: %v", filename, err)
+					return
+				}
+				defer resp.Body.Close()
+
+				if resp.StatusCode != http.StatusOK {
+					errors <- fmt.Errorf("upload %s failed with status %d", filename, resp.StatusCode)
+					return
+				}
+
+				respBody, err := io.ReadAll(resp.Body)
+				if err != nil {
+					errors <- fmt.Errorf("failed to read response: %v", err)
+					return
+				}
+
+				if !strings.Contains(string(respBody), filename) {
+					errors <- fmt.Errorf("expected filename %s in response", filename)
+					return
+				}
+			}(i)
+		}
+
+		// Wait for all uploads with timeout
+		done := make(chan bool)
+		go func() {
+			wg.Wait()
+			done <- true
+		}()
+
+		select {
+		case <-done:
+			// All uploads completed
+		case <-time.After(10 * time.Second):
+			t.Fatal("Concurrent uploads timed out")
+		}
+
+		// Check for errors
+		close(errors)
+		for err := range errors {
+			if err != nil {
+				t.Error(err)
+			}
+		}
+	})
 }
 
-func BenchmarkLargeFileUpload(b *testing.B) {
-	if err := waitForServer(5 * time.Second); err != nil {
-		b.Skip("Server not running:", err)
+// TestCurlLargeFileUpload tests uploading larger files
+func TestCurlLargeFileUpload(t *testing.T) {
+	// Skip if server is not running
+	resp, err := http.Get("http://localhost:8080/health")
+	if err != nil {
+		t.Skip("Server not running on localhost:8080, skipping integration tests")
 	}
+	resp.Body.Close()
 
-	testFile := filepath.Join(testDir, "large.txt")
+	t.Run("upload 5MB file", func(t *testing.T) {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cmd := exec.Command("curl",
-			"-X", "POST",
-			"-F", fmt.Sprintf("file=@%s", testFile),
-			"-s", "-o", "/dev/null",
-			serverURL,
-		)
-
-		err := cmd.Run()
+		fileWriter, err := writer.CreateFormFile("file", "large_5mb.bin")
 		if err != nil {
-			b.Fatalf("curl command failed: %v", err)
+			t.Fatalf("Failed to create form file: %v", err)
 		}
-	}
+
+		// Create 5MB of data
+		largeData := make([]byte, 5*1024*1024)
+		for i := range largeData {
+			largeData[i] = byte(i % 256)
+		}
+
+		_, err = fileWriter.Write(largeData)
+		if err != nil {
+			t.Fatalf("Failed to write large data: %v", err)
+		}
+
+		writer.Close()
+
+		start := time.Now()
+		resp, err := http.Post(
+			"http://localhost:8080/upload",
+			writer.FormDataContentType(),
+			&body,
+		)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("Failed to upload large file: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+
+		// Check that upload completed in reasonable time (< 5 seconds)
+		if elapsed > 5*time.Second {
+			t.Errorf("Large file upload took too long: %v", elapsed)
+		}
+	})
 }

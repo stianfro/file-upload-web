@@ -1,100 +1,107 @@
 package tests
 
 import (
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-// MockServer creates a mock HTTP server for testing
-// Since main.go doesn't exist yet, we'll simulate the expected behavior
-func createMockHealthHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/health" {
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method != http.MethodGet {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	}
-}
-
 func TestHealthEndpoint(t *testing.T) {
-	// Create a mock server with the health handler
-	handler := createMockHealthHandler()
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	// Make a GET request to the /health endpoint
-	resp, err := http.Get(server.URL + "/health")
+	// Skip if server is not running
+	resp, err := http.Get("http://localhost:8080/health")
 	if err != nil {
-		t.Fatalf("Failed to make request: %v", err)
+		t.Skip("Server not running on localhost:8080, skipping integration tests")
 	}
 	defer resp.Body.Close()
 
-	// Test 1: Verify status code is 200 OK
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, resp.StatusCode)
-	}
+	t.Run("GET /health returns 200 OK", func(t *testing.T) {
+		resp, err := http.Get("http://localhost:8080/health")
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
 
-	// Test 2: Verify Content-Type is text/plain
-	contentType := resp.Header.Get("Content-Type")
-	expectedContentType := "text/plain"
-	if contentType != expectedContentType {
-		t.Errorf("Expected Content-Type %q, got %q", expectedContentType, contentType)
-	}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", resp.StatusCode)
+		}
+	})
 
-	// Test 3: Verify response body contains "OK"
-	body := make([]byte, 2)
-	n, err := resp.Body.Read(body)
-	if err != nil && err.Error() != "EOF" {
-		t.Fatalf("Failed to read response body: %v", err)
-	}
+	t.Run("GET /health returns OK body", func(t *testing.T) {
+		resp, err := http.Get("http://localhost:8080/health")
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
 
-	responseBody := string(body[:n])
-	expectedBody := "OK"
-	if responseBody != expectedBody {
-		t.Errorf("Expected response body %q, got %q", expectedBody, responseBody)
-	}
-}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("Failed to read response body: %v", err)
+		}
 
-func TestHealthEndpointWrongMethod(t *testing.T) {
-	// Create a mock server with the health handler
-	handler := createMockHealthHandler()
-	server := httptest.NewServer(handler)
-	defer server.Close()
+		if string(body) != "OK" {
+			t.Errorf("Expected body to be 'OK', got '%s'", string(body))
+		}
+	})
 
-	// Test that non-GET methods are not allowed
-	resp, err := http.Post(server.URL+"/health", "application/json", nil)
-	if err != nil {
-		t.Fatalf("Failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
+	t.Run("GET /health returns text/plain Content-Type", func(t *testing.T) {
+		resp, err := http.Get("http://localhost:8080/health")
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("Expected status code %d for POST request, got %d", http.StatusMethodNotAllowed, resp.StatusCode)
-	}
-}
+		contentType := resp.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "text/plain") {
+			t.Errorf("Expected Content-Type to contain 'text/plain', got '%s'", contentType)
+		}
+	})
 
-func TestHealthEndpointWrongPath(t *testing.T) {
-	// Create a mock server with the health handler
-	handler := createMockHealthHandler()
-	server := httptest.NewServer(handler)
-	defer server.Close()
+	t.Run("POST /health returns 405 Method Not Allowed", func(t *testing.T) {
+		resp, err := http.Post("http://localhost:8080/health", "text/plain", strings.NewReader("test"))
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
 
-	// Test that wrong paths return 404
-	resp, err := http.Get(server.URL + "/wrong-path")
-	if err != nil {
-		t.Fatalf("Failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status 405 for POST, got %d", resp.StatusCode)
+		}
+	})
 
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("Expected status code %d for wrong path, got %d", http.StatusNotFound, resp.StatusCode)
-	}
+	t.Run("PUT /health returns 405 Method Not Allowed", func(t *testing.T) {
+		client := &http.Client{}
+		req, err := http.NewRequest(http.MethodPut, "http://localhost:8080/health", strings.NewReader("test"))
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status 405 for PUT, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("DELETE /health returns 405 Method Not Allowed", func(t *testing.T) {
+		client := &http.Client{}
+		req, err := http.NewRequest(http.MethodDelete, "http://localhost:8080/health", nil)
+		if err != nil {
+			t.Fatalf("Failed to create request: %v", err)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("Failed to make request: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("Expected status 405 for DELETE, got %d", resp.StatusCode)
+		}
+	})
 }
